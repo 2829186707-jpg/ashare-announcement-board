@@ -84,41 +84,85 @@ def fetch_day(date_str):
 
 
 # ============ 核心内容提取 ============
+# 模板/报告头字段行（整句过滤）
+_TEMPLATE_HEAD = re.compile(
+    r"^(?:上市公司名称|信息披露义务人|股票上市地点|股票简称|股票代码|证券简称|证券代码|公告编号|公司代码|"
+    r"住所|通讯地址|注册地址|办公地址|法定代表人|股份变动性质|签署日期|签署地点|报告日期|联系电话|"
+    r"传真|电子信箱|联系人|收购人|出让方|受让方)[^，。；;]{0,40}[:：]")
+# 保证声明/套话（整句过滤）
+_DECLARE = re.compile(
+    r"(?:本公司|公司)及?(?:董事会|监事会|全体董事|全体监事|全体成员|董事、监事|"
+    r"董事、高级管理人员|全体董事、监事及高级管理人员)[^。；;]{0,25}?保证|"
+    r"保证本公告内容不存在|保证本公告内容之|保证本公告内容真实|特此公告|"
+    r"本公司及全体董事保证|本公司及全体监事保证|谨此公告|特此声明")
+# 核心信息关键词（句子打分）
+_CORE_KW = ["减持", "增持", "回购", "收购", "质押", "担保", "诉讼", "仲裁", "中标", "签订", "协议",
+            "转让", "发行", "募集", "分红", "派息", "分配", "解除", "终止", "延期", "变更", "控制权",
+            "表决权", "股份", "股权", "股票", "交易", "投资", "借款", "授信", "利润", "净利", "营业",
+            "同比", "增长", "下降", "不超过", "不低于", "万元", "亿元", "授予", "解禁", "重组", "合并",
+            "分立", "要约", "预案", "方案", "承诺", "预计", "金额", "比例", "万股", "%"]
+
+
+# 报告头字段序列（句子内部挖除："上市公司名称：xxx 住所：xxx" 等；股份变动性质含关键信息，保留）
+_FIELD_SEQ = re.compile(
+    r"(?:上市公司名称|信息披露义务人名称|信息披露义务人|股票上市地点|股票简称|股票代码|证券简称|证券代码|公告编号|公司代码|"
+    r"住所|通讯地址|注册地址|办公地址|法定代表人|签署日期|签署地点|报告日期|联系电话|传真|电子信箱)"
+    r"\s*[:：]\s*[^，。；;]{0,60}")
+# 简称定义噪音："（以下简称"公司"）" / "（以下简称"公司"或"本公司"）"
+_ABBR = re.compile(r"[（(]以下简称[^）)]{1,40}[）)]")
+# 声明片段："保证...真实、准确、完整"（容忍空格）
+_ASSURE = re.compile(r"保证[^。；;]{0,24}真实[、，]?\s*准\s*确\s*[、，]?\s*完\s*整")
+# 公司名（不计入关键词打分，避免"股份"二字误伤）
+_CORP = re.compile(r"[\u4e00-\u9fa5]{2,20}股份有限公司")
+# 目录行（权益变动报告书等）："....4" / "第二节信息披露义务人介绍...."
+_TOC = re.compile(r"\d{1,2}\s*[。.·]{4,}|第[一二三四五六七八九十]+节")
+# 名称字段变体："名称：xxx"（值不参与核心句）
+_NAME_FIELD = re.compile(r"(?:信息披露义务人|收购人|出让方|受让方)?名称\s*[:：]\s*[^，。；;]{0,40}")
+
+
 def _pick_core(text, title):
-    """从正文中挑选核心段落"""
+    """核心句提取：过滤模板/声明/报告头句，按信息量保留含数字或关键信息的句子"""
+    # 优先取"重要内容提示"区域（若有），但仅作候选，仍需经句子过滤
+    cand = text
     for marker in ["重要内容提示", "重要提示", "特别提示", "一、重要提示"]:
         idx = text.find(marker)
         if idx >= 0:
-            seg = text[idx + len(marker): idx + len(marker) + 600]
-            seg = seg.strip(" ：:。；;，, ")
-            if len(seg) > 40:
-                text = seg
+            seg = text[idx + len(marker): idx + len(marker) + 900]
+            if len(seg.strip(" ：:。；;，, ")) > 40:
+                cand = seg
                 break
-    else:
-        # 未命中提示章节：跳过报告头（证券代码/简称/编号等）
-        text = re.sub(
-            r"^(?:证券代码[^，。；;]{0,30}[，。；;]?|证券简称[^，。；;]{0,30}[，。；;]?"
-            r"|公告编号[^，。；;]{0,30}[，。；;]?|上市公司名称[^，。；;]{0,50}[，。；;]?"
-            r"|股票简称[^，。；;]{0,30}[，。；;]?|股票代码[^，。；;]{0,30}[，。；;]?"
-            r"|股票上市地点[^，。；;]{0,30}[，。；;]?|公司代码[^，。；;]{0,30}[，。；;]?){1,8}",
-            "", text, count=1)
-        text = re.sub(
-            r"^(?:本公司及董事会全体成员[^。]{0,60}[。]?|本公司董事会及全体董事[^。]{0,60}[。]?"
-            r"|本公司及全体董事[^。]{0,60}[。]?|本公司及监事会全体成员[^。]{0,60}[。]?"
-            r"|重要内容提示[:：]?|特别提示[:：]?){0,4}",
-            "", text, count=1)
-        text = text.strip(" ：:。；;，, ")
-    text = text[:SUMMARY_MAX_CHARS + 300]
-    # 在句号/分号处截断，保持完整句子
-    cut = -1
-    for m in re.finditer(r"[。；;！？]\s", text):
-        if m.end() <= SUMMARY_MAX_CHARS + 60:
-            cut = m.end()
-        else:
+    # 按句切分，逐句过滤打分
+    sents = [s.strip() for s in re.split(r"(?<=[。；;！？])", cand) if len(s.strip()) >= 8]
+    picked, used = [], 0
+    for s in sents:
+        if _DECLARE.search(s) or _TEMPLATE_HEAD.match(s):
+            continue
+        s = _FIELD_SEQ.sub("", s)
+        s = _NAME_FIELD.sub("", s)
+        s = _ABBR.sub("", s)
+        s = _ASSURE.sub("", s).strip(" ：:，, ")
+        if len(s) < 8 or _TOC.search(s):
+            continue
+        s2 = _CORP.sub("", s)
+        score = len(re.findall(r"\d", s2)) * 2 + sum(1 for k in _CORE_KW if k in s2) * 2
+        if score < 2:
+            continue
+        picked.append(s)
+        used += len(s)
+        if used >= SUMMARY_MAX_CHARS:
             break
-    if cut > 80:
-        text = text[:cut]
-    return text.strip()[:SUMMARY_MAX_CHARS]
+    out = "".join(picked)
+    if len(out) < 60:
+        # 兜底：保留全部非模板句（尽量保真）
+        out = "".join(s for s in sents if not _DECLARE.search(s) and not _TEMPLATE_HEAD.match(s) and not _TOC.search(s))
+        out = _FIELD_SEQ.sub("", out)
+        out = _NAME_FIELD.sub("", out)
+        out = _ABBR.sub("", out)
+        out = _ASSURE.sub("", out)
+    out = out[:SUMMARY_MAX_CHARS]
+    if not out:
+        out = text[:SUMMARY_MAX_CHARS]
+    return out.strip(" ：:。；;，, ")
 
 
 def extract_summary(adjunct_url, sec_name, title):
@@ -149,18 +193,35 @@ def extract_summary(adjunct_url, sec_name, title):
                 import fitz as pymupdf
             doc = pymupdf.open(fname)
             n = min(PDF_PARSE_PAGES, doc.page_count)
+            pages = []
             for pno in range(n):
                 t = doc[pno].get_text() or ""
                 if t.strip():
-                    text += t + "\n"
+                    pages.append(t.strip())
             doc.close()
+            # 封面页检测：首页短（≤140字）且（极短 / 与标题高度重合 / 几乎无句号）；或首页为头字段页（含证券代码/公告编号）→ 跳过
+            if len(pages) > 1:
+                first = re.sub(r"\s+", "", pages[0])
+                t0 = re.sub(r"\s+", "", title or "")
+                overlap = sum(1 for ch in first if ch in t0) / max(len(first), 1)
+                head_page = ("证券代码" in first or "公告编号" in first) and len(first) <= 1200
+                if (len(first) <= 140 and (len(first) <= 40 or overlap > 0.45 or first.count("。") <= 1)) or head_page:
+                    pages = pages[1:]
+            text = " ".join(pages)
         except Exception:
             from pypdf import PdfReader
             reader = PdfReader(fname)
+            pages = []
             for p in reader.pages[:PDF_PARSE_PAGES]:
                 t = p.extract_text() or ""
                 if t.strip():
-                    text += t + "\n"
+                    pages.append(t.strip())
+            if len(pages) > 1:
+                first = re.sub(r"\s+", "", pages[0])
+                t0 = re.sub(r"\s+", "", title or "")
+                if len(first) <= 140 and (len(first) <= 40 or sum(1 for ch in first if ch in t0) / max(len(first), 1) > 0.45):
+                    pages = pages[1:]
+            text = " ".join(pages)
         text = re.sub(r"\s+", " ", text).strip()
     except Exception:
         text = ""
