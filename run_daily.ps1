@@ -30,8 +30,24 @@ try {
   if ($changed) {
     git add -A
     git commit -m "daily update $ts"
-    git push origin main
-    Log 'Commit + push done'
+    # Push: direct first, fallback to SakuraCat proxy
+    $pushed = $false
+    git push origin main *>> "$root\daily.log"
+    if ($LASTEXITCODE -eq 0) { $pushed = $true }
+    if (-not $pushed) {
+      Log 'Direct push failed, trying via SakuraCat proxy...'
+      $core = Get-Process core -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($core) {
+        $ports = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+                 Where-Object { $_.OwningProcess -eq $core.Id } |
+                 Select-Object -ExpandProperty LocalPort
+        foreach ($pt in $ports) {
+          git -c http.proxy="http://127.0.0.1:$pt" -c https.proxy="http://127.0.0.1:$pt" push origin main *>> "$root\daily.log"
+          if ($LASTEXITCODE -eq 0) { $pushed = $true; break }
+        }
+      }
+    }
+    if ($pushed) { Log 'Commit + push done' } else { Log 'Commit ok, push FAILED (direct & proxy)' }
   } else {
     Log 'No changes, skip commit'
   }
