@@ -1,0 +1,10 @@
+# 临时文件与日志
+temp_pdf/
+__pycache__/
+*.pyc
+fetch.log
+server.log
+
+# 系统文件
+Thumbs.db
+.DS_Store

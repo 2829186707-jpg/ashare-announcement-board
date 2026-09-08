@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股公告看板</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI','PingFang SC','Microsoft YaHei',Arial,sans-serif; background:#F4F3EE; color:#1A1B1C; }
+  .wrap { max-width:1000px; margin:0 auto; padding:16px; }
+  header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
+  h1 { font-size:20px; font-weight:600; }
+  .sub { font-size:12px; color:#6B7280; margin-top:3px; }
+  .btn { background:#2B5BD7; color:#fff; border:none; border-radius:8px; padding:8px 16px; font-size:13px; cursor:pointer; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  .stat { flex:1 1 140px; background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:12px; padding:10px 14px; }
+  .stat .n { font-size:22px; font-weight:600; }
+  .stat .l { font-size:12px; color:#6B7280; margin-top:2px; }
+  .stat.imp .n { color:#D4380D; }
+  .stat.rt .n { color:#8C8C8C; }
+  .filters { background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:12px; padding:12px; margin-bottom:14px;
+             display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .filters select, .filters input[type=text] { padding:7px 10px; border:1px solid #D9D9D9; border-radius:8px; font-size:13px; background:#fff; }
+  .filters input[type=text] { flex:1 1 160px; min-width:120px; }
+  .toggle { display:flex; align-items:center; gap:6px; font-size:13px; color:#333; cursor:pointer; user-select:none; }
+  .countline { font-size:12px; color:#6B7280; margin-bottom:8px; }
+  .item { background:#fff; border:1px solid rgba(0,0,0,.08); border-radius:12px; padding:12px 14px; margin-bottom:10px; }
+  .item.rt { opacity:.62; }
+  .row1 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .tm { font-size:12px; color:#6B7280; font-variant-numeric:tabular-nums; }
+  .co { font-size:14px; font-weight:600; }
+  .code { font-size:12px; color:#8C8C8C; font-weight:400; }
+  .badge { font-size:11px; border-radius:999px; padding:2px 9px; white-space:nowrap; }
+  .title { font-size:14px; margin-top:6px; line-height:1.5; }
+  .sum { font-size:12.5px; color:#444; background:#F7F7F4; border-radius:8px; padding:8px 10px; margin-top:8px; line-height:1.6; }
+  .sum b { color:#D4380D; font-weight:600; }
+  a.src { font-size:12px; color:#2B5BD7; text-decoration:none; margin-left:auto; white-space:nowrap; }
+  .empty { text-align:center; color:#8C8C8C; font-size:13px; padding:40px 0; }
+  .tip { font-size:12px; color:#6B7280; margin-top:10px; text-align:center; }
+  @media (max-width:480px){ .wrap{padding:10px;} h1{font-size:17px;} .stat{flex-basis:100px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>A股公告看板</h1>
+      <div class="sub" id="updatedAt">加载中…</div>
+    </div>
+    <button class="btn" id="fetchBtn" onclick="manualFetch()">立即抓取</button>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="n" id="stTotal">-</div><div class="l">公告总数</div></div>
+    <div class="stat imp"><div class="n" id="stImp">-</div><div class="l">重要公告</div></div>
+    <div class="stat rt"><div class="n" id="stRt">-</div><div class="l">例行公告</div></div>
+  </div>
+
+  <div class="filters">
+    <select id="fDate" onchange="loadData()"></select>
+    <select id="fIndustry" onchange="render()"><option value="">全部行业</option></select>
+    <select id="fType" onchange="render()"><option value="">全部类型</option></select>
+    <input type="text" id="fQ" placeholder="搜索公司 / 标题关键词…" oninput="render()">
+    <label class="toggle"><input type="checkbox" id="fImp" checked onchange="render()">只看重要</label>
+  </div>
+
+  <div class="countline" id="countLine"></div>
+  <div id="list"></div>
+  <div class="tip">数据来源：巨潮资讯网（沪深交易所指定披露平台）· 每个工作日 8:35 自动抓取并推送</div>
+</div>
+
+<script>
+(function(){
+  var state = { date:null, data:null };
+
+  function esc(s){
+    if(s == null) return '';
+    return String(s).replace(/[&<>"']/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  var typeColors = {
+    '业绩预告':'#D4380D','定期报告':'#C41D7F','分红送转':'#D4380D','风险事项':'#CF1322','风险警示':'#CF1322',
+    '增减持':'#7B1FA2','回购':'#7B1FA2','股权质押':'#7B1FA2','股权变动':'#7B1FA2','股权激励':'#7B1FA2',
+    '合同业务':'#389E0D','对外投资':'#389E0D','对外担保':'#389E0D',
+    '重组并购':'#096DD9','融资事项':'#096DD9','停复牌':'#096DD9','监管问询':'#096DD9','减值事项':'#D46B08',
+    '人事变动':'#D46B08','其他':'#595959','例行公告':'#8C8C8C'
+  };
+  function badge(t){
+    var c = typeColors[t] || '#595959';
+    return '<span class="badge" style="background:'+c+'1a;color:'+c+';border:1px solid '+c+'33;">'+esc(t)+'</span>';
+  }
+
+  function loadDates(){
+    fetch('data/dates.json').then(function(r){ return r.json(); }).then(function(ds){
+      var sel = document.getElementById('fDate');
+      if(!ds.length){ sel.innerHTML = '<option value="">暂无数据</option>'; document.getElementById('list').innerHTML = '<div class="empty">还没有公告数据，点击右上角"立即抓取"开始。</div>'; return; }
+      sel.innerHTML = ds.map(function(d){
+        var label = d;
+        try{
+          var p = d.split('-');
+          var wd = new Date(+p[0], +p[1]-1, +p[2]).getDay();
+          var wnames = ['周日','周一','周二','周三','周四','周五','周六'];
+          label = d + ' ' + wnames[wd];
+        }catch(e){}
+        return '<option value="'+d+'">'+label+'</option>';
+      }).join('');
+      sel.value = ds[0];
+      loadData();
+    });
+  }
+
+  function loadData(){
+    var d = document.getElementById('fDate').value;
+    if(!d) return;
+    fetch('data/'+d+'.json').then(function(r){ return r.json(); }).then(function(data){
+      state.data = data;
+      document.getElementById('updatedAt').textContent = '数据日期：' + d + ' · 更新于 ' + (data.updated_at || '-');
+      // 聚合行业/类型
+      var inds = {}, types = {};
+      (data.announcements||[]).forEach(function(a){
+        inds[a.industry] = (inds[a.industry]||0) + 1;
+        types[a.type] = (types[a.type]||0) + 1;
+      });
+      var iSel = document.getElementById('fIndustry'), tSel = document.getElementById('fType');
+      var curI = iSel.value, curT = tSel.value;
+      iSel.innerHTML = '<option value="">全部行业</option>' + Object.keys(inds).sort().map(function(k){
+        return '<option value="'+esc(k)+'">'+esc(k)+' ('+inds[k]+')</option>';
+      }).join('');
+      tSel.innerHTML = '<option value="">全部类型</option>' + Object.keys(types).sort(function(a,b){ return b.localeCompare(a); }).map(function(k){
+        return '<option value="'+esc(k)+'">'+esc(k)+' ('+types[k]+')</option>';
+      }).join('');
+      if(curI && inds[curI]) iSel.value = curI;
+      if(curT && types[curT]) tSel.value = curT;
+      document.getElementById('stTotal').textContent = data.total || 0;
+      document.getElementById('stImp').textContent = data.important_count || 0;
+      document.getElementById('stRt').textContent = (data.total||0) - (data.important_count||0);
+      render();
+    });
+  }
+
+  function filtered(){
+    var a = (state.data && state.data.announcements) || [];
+    var ind = document.getElementById('fIndustry').value;
+    var tp = document.getElementById('fType').value;
+    var q = document.getElementById('fQ').value.trim().toLowerCase();
+    var imp = document.getElementById('fImp').checked;
+    return a.filter(function(r){
+      if(ind && r.industry !== ind) return false;
+      if(tp && r.type !== tp) return false;
+      if(imp && !r.important) return false;
+      if(q){
+        var hay = (r.sec_name + ' ' + r.sec_code + ' ' + r.title).toLowerCase();
+        if(hay.indexOf(q) < 0) return false;
+      }
+      return true;
+    });
+  }
+
+  function render(){
+    var rows = filtered();
+    document.getElementById('countLine').textContent = '共 ' + rows.length + ' 条' + (rows.length !== (state.data&&state.data.total) ? ' / 当日全部 ' + (state.data?state.data.total:0) + ' 条' : '');
+    var box = document.getElementById('list');
+    if(!rows.length){ box.innerHTML = '<div class="empty">没有符合条件的公告</div>'; return; }
+    box.innerHTML = rows.map(function(r){
+      var cls = r.important ? '' : ' rt';
+      var sum = '';
+      if(r.summary){
+        sum = '<div class="sum"><b>核心内容</b>：' + esc(r.summary) + '</div>';
+      }
+      var link = r.url ? '<a class="src" href="'+esc(r.url)+'" target="_blank" rel="noopener">查看原文 PDF ↗</a>' : '';
+      var t = r.time || '';
+      var hm = t.length >= 16 ? t.slice(11,16) : '';
+      var indBadge = r.industry && r.industry !== '未分类' ? '<span class="badge" style="background:#E6F4FF;color:#0958D9;border:1px solid #91CAFF;">'+esc(r.industry)+'</span>' : '';
+      return '<div class="item'+cls+'">' +
+        '<div class="row1"><span class="tm">'+esc(hm)+'</span>' +
+        '<span class="co">'+esc(r.sec_name)+'<span class="code"> '+esc(r.sec_code)+'</span></span>' +
+        badge(r.type) + indBadge + link +
+        '</div>' +
+        '<div class="title">'+esc(r.title)+'</div>' + sum +
+        '</div>';
+    }).join('');
+  }
+
+  function manualFetch(){
+    var b = document.getElementById('fetchBtn');
+    b.disabled = true; b.textContent = '抓取中…';
+    fetch('/api/fetch', { method:'POST' }).then(function(r){ return r.json(); }).then(function(j){
+      setTimeout(function(){
+        b.disabled = false; b.textContent = '立即抓取';
+        loadDates();
+      }, 8000);
+    }).catch(function(){
+      b.disabled = false; b.textContent = '立即抓取';
+      alert('网页版不支持在线抓取，请在本地启动看板后使用，或等待每日 8:35 定时任务');
+    });
+  }
+
+  // 暴露给内联事件处理器（onchange/onclick 在全局作用域查找）
+  window.render = render;
+  window.loadData = loadData;
+  window.manualFetch = manualFetch;
+
+  loadDates();
+})();
+</script>
+</body>
+</html>
