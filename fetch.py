@@ -20,6 +20,12 @@ import time
 import requests
 from concurrent.futures import ThreadPoolExecutor
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 from config import DATA_DIR, INDUSTRY_FILE, PDF_DIR, STATE_FILE, SUMMARY_MAX_CHARS, PDF_PARSE_PAGES, PDF_WORKERS, TIMEOUT
 
 CNINFO_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
