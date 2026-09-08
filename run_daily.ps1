@@ -1,6 +1,6 @@
 # Daily fetch + push script (Task Scheduler: weekdays 08:35)
 $ErrorActionPreference = 'Continue'
-$root = 'C:\Users\veken\Desktop\公告读取'
+$root = $PSScriptRoot
 $py   = 'C:\Users\veken\AppData\Local\Programs\Python\Python314\python.exe'
 Set-Location $root
 $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
