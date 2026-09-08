@@ -48,7 +48,7 @@
       <h1>A股公告看板</h1>
       <div class="sub" id="updatedAt">加载中…</div>
     </div>
-    <button class="btn" id="fetchBtn" onclick="manualFetch()">立即抓取</button>
+    <button class="btn" id="fetchBtn" onclick="manualFetch()">每日自动更新</button>
   </header>
 
   <div class="stats">
@@ -67,7 +67,7 @@
 
   <div class="countline" id="countLine"></div>
   <div id="list"></div>
-  <div class="tip">数据来源：巨潮资讯网（沪深交易所指定披露平台）· 每个工作日 8:35 自动抓取并推送</div>
+  <div class="tip">数据来源：巨潮资讯网（沪深交易所指定披露平台）· 每个工作日 8:40 自动更新</div>
 </div>
 
 <script>
@@ -96,7 +96,7 @@
   function loadDates(){
     fetch('data/dates.json').then(function(r){ return r.json(); }).then(function(ds){
       var sel = document.getElementById('fDate');
-      if(!ds.length){ sel.innerHTML = '<option value="">暂无数据</option>'; document.getElementById('list').innerHTML = '<div class="empty">还没有公告数据，点击右上角"立即抓取"开始。</div>'; return; }
+      if(!ds.length){ sel.innerHTML = '<option value="">暂无数据</option>'; document.getElementById('list').innerHTML = '<div class="empty">还没有公告数据，请等待每日 8:40 自动更新。</div>'; return; }
       sel.innerHTML = ds.map(function(d){
         var label = d;
         try{
@@ -185,17 +185,7 @@
   }
 
   function manualFetch(){
-    var b = document.getElementById('fetchBtn');
-    b.disabled = true; b.textContent = '抓取中…';
-    fetch('/api/fetch', { method:'POST' }).then(function(r){ return r.json(); }).then(function(j){
-      setTimeout(function(){
-        b.disabled = false; b.textContent = '立即抓取';
-        loadDates();
-      }, 8000);
-    }).catch(function(){
-      b.disabled = false; b.textContent = '立即抓取';
-      alert('网页版不支持在线抓取，请在本地启动看板后使用，或等待每日 8:35 定时任务');
-    });
+    alert('请等待，每天八点四十自动更新');
   }
 
   // 暴露给内联事件处理器（onchange/onclick 在全局作用域查找）
