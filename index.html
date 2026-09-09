@@ -94,7 +94,7 @@
   }
 
   function loadDates(){
-    fetch('data/dates.json').then(function(r){ return r.json(); }).then(function(ds){
+    fetch('data/dates.json', {cache:'no-store'}).then(function(r){ return r.json(); }).then(function(ds){
       var sel = document.getElementById('fDate');
       if(!ds.length){ sel.innerHTML = '<option value="">暂无数据</option>'; document.getElementById('list').innerHTML = '<div class="empty">还没有公告数据，请等待每日 8:40 自动更新。</div>'; return; }
       sel.innerHTML = ds.map(function(d){
@@ -115,7 +115,7 @@
   function loadData(){
     var d = document.getElementById('fDate').value;
     if(!d) return;
-    fetch('data/'+d+'.json').then(function(r){ return r.json(); }).then(function(data){
+    fetch('data/'+d+'.json', {cache:'no-store'}).then(function(r){ return r.json(); }).then(function(data){
       state.data = data;
       document.getElementById('updatedAt').textContent = '数据日期：' + d + ' · 更新于 ' + (data.updated_at || '-');
       // 聚合行业/类型
